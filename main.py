@@ -14,6 +14,43 @@ from md_gen import md_gen
 from cache_gen import cache_gen
 from url_utils import quote_url
 
+def select_settings_file():
+    """选择要使用的 settings 文件"""
+    settings_files = [f for f in os.listdir('.') if f.startswith('settings') and f.endswith('.json')]
+    if not settings_files:
+        print("错误: 未找到任何 settings 文件")
+        sys.exit(1)
+    if len(settings_files) == 1:
+        print(f"使用配置文件: {settings_files[0]}\n")
+        return settings_files[0]
+    print("=" * 60)
+    print("发现多个配置文件，请选择要使用的配置：")
+    print("=" * 60)
+    settings_files.sort()
+    for idx, filename in enumerate(settings_files, 1):
+        try:
+            with open(filename, 'r', encoding='utf8') as f:
+                temp_settings = json.load(f)
+                user_info = temp_settings.get('user_lst', '未设置')
+                print(f"{idx}. {filename:<30} (用户: {user_info})")
+        except:
+            print(f"{idx}. {filename}")
+    print("=" * 60)
+    while True:
+        try:
+            choice = input(f"请选择配置文件 (1-{len(settings_files)}): ").strip()
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(settings_files):
+                selected_file = settings_files[choice_num - 1]
+                print(f"\n已选择: {selected_file}\n")
+                return selected_file
+            else:
+        except ValueError:
+            print("请输入有效的数字")
+        except KeyboardInterrupt:
+            print("\n\n已取消")
+            sys.exit(0)
+
 def del_special_char(string):
     string = re.sub(r'[^\u4e00-\u9fa5\u0030-\u0039\u0041-\u005a\u0061-\u007a\u3040-\u31FF\.]', '', string)
     return string
@@ -59,7 +96,10 @@ end_time_stamp = 2548484357000    #2050-10-04
 start_label = True
 First_Page = True       #首页提取内容时特殊处理
 
-with open('settings.json', 'r', encoding='utf8') as f:
+# 选择配置文件
+settings_file = select_settings_file()
+
+with open(settings_file, 'r', encoding='utf8') as f:
     settings = json.load(f)
     if not settings['save_path']:
         settings['save_path'] = os.getcwd()
@@ -77,6 +117,7 @@ with open('settings.json', 'r', encoding='utf8') as f:
         autoSync = True
     if settings['down_log']:
         down_log = True
+    share_cache = settings.get('share_cache', False)
     if settings['likes']:   #likes的逻辑和retweet大致相同
         has_retweet = True
         has_likes = True
@@ -187,10 +228,12 @@ def get_download_url(_user_info):
                 if 'tweet' in i['entryId']:     #正常推文
                     if 'tweet' in i[x_label]['itemContent']['tweet_results']['result']:
                         a = i[x_label]['itemContent']['tweet_results']['result']['tweet']['legacy']       #适配限制回复账号
+                        author_screen_name = i[x_label]['itemContent']['tweet_results']['result']['tweet']['core']['user_results']['result']['legacy']['screen_name']
                         frr = [a['favorite_count'], a['retweet_count'], a['reply_count']]
                         tweet_msecs = int(i[x_label]['itemContent']['tweet_results']['result']['tweet']['edit_control']['editable_until_msecs']) - 3600000
                     else:
                         a = i[x_label]['itemContent']['tweet_results']['result']['legacy']
+                        author_screen_name = i[x_label]['itemContent']['tweet_results']['result']['core']['user_results']['result']['legacy']['screen_name']
                         frr = [a['favorite_count'], a['retweet_count'], a['reply_count']]
                         tweet_msecs = int(i[x_label]['itemContent']['tweet_results']['result']['edit_control']['editable_until_msecs']) - 3600000
                     timestr = stamp2time(tweet_msecs)
@@ -208,7 +251,7 @@ def get_download_url(_user_info):
                                 name = a2['name']
                                 screen_name = a2['screen_name']
                             if 'extended_entities' in a:
-                                _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}-vid', [tweet_msecs, name, f'@{screen_name}', _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', a['full_text']] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}-img', [tweet_msecs, name, f'@{screen_name}', _media['expanded_url'], 'Image', _media['media_url_https'], '', a['full_text']] + frr) for _media in a['extended_entities']['media']]
+                                _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}_@{author_screen_name}-vid', [tweet_msecs, name, f'@{screen_name}', _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', a['full_text']] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}_@{author_screen_name}-img', [tweet_msecs, name, f'@{screen_name}', _media['expanded_url'], 'Image', _media['media_url_https'], '', a['full_text']] + frr) for _media in a['extended_entities']['media']]
 
                         elif has_retweet:
                             name = a['retweeted_status_result']['result']['core']['user_results']['result']['legacy']['name']
@@ -217,7 +260,7 @@ def get_download_url(_user_info):
                             id_str = a['retweeted_status_result']['result']['legacy']['id_str']
                             
                             if 'extended_entities' in a['retweeted_status_result']['result']['legacy'] and screen_name != _user_info.screen_name:
-                                _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}-vid-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', full_text] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}-img-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Image', _media['media_url_https'], '', full_text] + frr) for _media in a['retweeted_status_result']['result']['legacy']['extended_entities']['media']]
+                                _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}_@{screen_name}-vid-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', full_text] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}_@{screen_name}-img-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Image', _media['media_url_https'], '', full_text] + frr) for _media in a['retweeted_status_result']['result']['legacy']['extended_entities']['media']]
 
                     elif not _result[1]:    #已超出目标时间范围
                         start_label = False
@@ -226,10 +269,12 @@ def get_download_url(_user_info):
                 elif 'profile-conversation' in i['entryId']:    #回复的推文(对话线索)
                     if 'tweet' in i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']:
                         a = i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['tweet']['legacy']
+                        author_screen_name = i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['tweet']['core']['user_results']['result']['legacy']['screen_name']
                         frr = [a['favorite_count'], a['retweet_count'], a['reply_count']]
                         tweet_msecs = int(i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['tweet']['edit_control']['editable_until_msecs']) - 3600000
                     else:
                         a = i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['legacy']
+                        author_screen_name = i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['core']['user_results']['result']['legacy']['screen_name']
                         frr = [a['favorite_count'], a['retweet_count'], a['reply_count']]
                         tweet_msecs = int(i[x_label]['items'][0]['item']['itemContent']['tweet_results']['result']['edit_control']['editable_until_msecs']) - 3600000
                     timestr = stamp2time(tweet_msecs)
@@ -237,7 +282,7 @@ def get_download_url(_user_info):
                     _result = time_comparison(tweet_msecs, start_time_stamp, end_time_stamp)
                     if _result[0]:  #符合时间限制
                         if 'extended_entities' in a:
-                            _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}-vid', [tweet_msecs, _user_info.name, f'@{_user_info.screen_name}', _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', a['full_text']] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}-img', [tweet_msecs, _user_info.name, f'@{_user_info.screen_name}', _media['expanded_url'], 'Image', _media['media_url_https'], '', a['full_text']] + frr) for _media in a['extended_entities']['media']]
+                            _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}_@{author_screen_name}-vid', [tweet_msecs, _user_info.name, f'@{_user_info.screen_name}', _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', a['full_text']] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}_@{author_screen_name}-img', [tweet_msecs, _user_info.name, f'@{_user_info.screen_name}', _media['expanded_url'], 'Image', _media['media_url_https'], '', a['full_text']] + frr) for _media in a['extended_entities']['media']]
                     elif not _result[1]:    #已超出目标时间范围
                         start_label = False
                         break
@@ -322,6 +367,12 @@ def get_download_url(_user_info):
 def download_control(_user_info):
     async def _main():
         async def down_save(url, prefix, csv_info, order: int):
+            # 保存原始URL用于缓存（去除参数）
+            if '?' in url:
+                original_url = url.split('?')[0]
+            else:
+                original_url = url
+
             if '.mp4' in url:
                 _file_name = f'{_user_info.save_path + os.sep}{prefix}_{_user_info.count + order}.mp4'
             else:
@@ -360,6 +411,10 @@ def download_control(_user_info):
                     if log_output:
                         print(f'{_file_name}=====>下载完成')
 
+                    # 下载完成后保存缓存（使用原始URL）
+                    if down_log:
+                        cache_data.add(original_url)
+
                     break
                 except Exception as e:
                     if '.mp4' in url or orig_format or str(e) != "404":
@@ -381,7 +436,8 @@ def download_control(_user_info):
                 continue
             semaphore = asyncio.Semaphore(max_concurrent_requests)    #最大并发数量，默认为8，对自己网络有自信的可以调高
             if down_log:
-                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.is_present(url[0])])
+                # 检查缓存时也要去除URL参数
+                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.is_present(url[0].split('?')[0] if '?' in url[0] else url[0])])
             else:
                 await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst)])
             _user_info.count += len(photo_lst)      #更新计数
@@ -411,7 +467,7 @@ def main(_user_info: object):
 
     if down_log:
         global cache_data
-        cache_data = cache_gen(_user_info.save_path)
+        cache_data = cache_gen(_user_info.save_path, is_share=share_cache)
 
     if autoSync:
         files = sorted(os.listdir(_user_info.save_path))
