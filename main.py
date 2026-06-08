@@ -398,6 +398,12 @@ def download_control(_user_info):
 
             if '.mp4' in url:
                 _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.mp4'
+                # if os.path.exists(_file_name):
+                #     if log_output:
+                #         print(f'{_file_name} 已存在，跳过')
+                #     if down_log:
+                #         cache_data.add(original_url)
+                #     return False
             else:
                 try:
                     if orig_format:
@@ -409,6 +415,12 @@ def download_control(_user_info):
                             url += f'?format=jpg&name=4096x4096'
                         else:
                             url += f'?format=png&name=4096x4096'
+                    # if os.path.exists(_file_name):
+                    #     if log_output:
+                    #         print(f'{_file_name} 已存在，跳过')
+                    #     if down_log:
+                    #         cache_data.add(original_url)
+                    #     return False
                 except Exception as e:
                     print(url)
                     return False
@@ -434,9 +446,18 @@ def download_control(_user_info):
                     if log_output:
                         print(f'{_file_name}=====>下载完成')
 
-                    # 下载完成后保存缓存（使用原始URL）
+                    # 下载完成后保存缓存
                     if down_log:
-                        cache_data.add(original_url)
+                        metadata = {
+                            'url': original_url,
+                            'tweet_time': csv_info[0],
+                            'author_screen_name': csv_info[2],
+                            'author_name': csv_info[1],
+                            'tweet_url': csv_info[3],
+                            'media_type': csv_info[4],
+                            'tweet_text': csv_info[7]
+                        }
+                        cache_data.add(filename, metadata)
 
                     break
                 except Exception as e:
@@ -459,8 +480,8 @@ def download_control(_user_info):
                 continue
             semaphore = asyncio.Semaphore(max_concurrent_requests)    #最大并发数量，默认为8，对自己网络有自信的可以调高
             if down_log:
-                # 检查缓存时也要去除URL参数
-                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.is_present(url[0].split('?')[0] if '?' in url[0] else url[0])])
+                # 检查缓存时使用 file_hash
+                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.is_present(extract_resource_filename(url[0]))])
             else:
                 await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst)])
             _user_info.count += len(photo_lst)      #更新计数
@@ -517,7 +538,7 @@ def main(_user_info: object):
         md_file.md_close()
 
     if down_log:
-        del cache_data
+        cache_data.close()
     print(f'{_user_info.name}下载完成\n\n')
 
 if __name__=='__main__':
