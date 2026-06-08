@@ -45,6 +45,7 @@ def select_settings_file():
                 print(f"\n已选择: {selected_file}\n")
                 return selected_file
             else:
+                print(f"请输入 1 到 {len(settings_files)} 之间的数字")
         except ValueError:
             print("请输入有效的数字")
         except KeyboardInterrupt:
