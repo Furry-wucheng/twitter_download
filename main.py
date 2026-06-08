@@ -1,6 +1,7 @@
 import re
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 import httpx
 import asyncio
 import os
@@ -51,6 +52,24 @@ def select_settings_file():
         except KeyboardInterrupt:
             print("\n\n已取消")
             sys.exit(0)
+
+def extract_resource_filename(url):
+    """从URL中提取服务器文件名（不含扩展名和参数）"""
+    if '?' in url:
+        url = url.split('?')[0]
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    filename = os.path.basename(path)
+    return filename.split('.')[0]
+
+def extract_resource_filename(url):
+    """从URL中提取服务器文件名"""
+    if '?' in url:
+        url = url.split('?')[0]
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    filename = os.path.basename(path)
+    return filename.split('.')[0]
 
 def del_special_char(string):
     string = re.sub(r'[^\u4e00-\u9fa5\u0030-\u0039\u0041-\u005a\u0061-\u007a\u3040-\u31FF\.]', '', string)
@@ -374,15 +393,18 @@ def download_control(_user_info):
             else:
                 original_url = url
 
+            # 使用服务器文件名
+            filename = extract_resource_filename(url)
+
             if '.mp4' in url:
-                _file_name = f'{_user_info.save_path + os.sep}{prefix}_{_user_info.count + order}.mp4'
+                _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.mp4'
             else:
                 try:
                     if orig_format:
                         url += f'?name=orig'
-                        _file_name = f'{_user_info.save_path + os.sep}{prefix}_{_user_info.count + order}.{csv_info[5][-3:]}' # 根据图片 url 获取原始格式
+                        _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.{csv_info[5][-3:]}' # 根据图片 url 获取原始格式
                     else: # 指定格式时，先使用 name=orig，404 则切回 name=4096x4096，以保证最大尺寸
-                        _file_name = f'{_user_info.save_path + os.sep}{prefix}_{_user_info.count + order}.{img_format}'
+                        _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.{img_format}'
                         if img_format != 'png':
                             url += f'?format=jpg&name=4096x4096'
                         else:

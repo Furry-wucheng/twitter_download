@@ -39,3 +39,5 @@ Thumbs.db
 # Project specific
 *.db
 *.sqlite
+settings_*.json
+settings-*.json
