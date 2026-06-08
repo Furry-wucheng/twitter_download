@@ -62,15 +62,6 @@ def extract_resource_filename(url):
     filename = os.path.basename(path)
     return filename.split('.')[0]
 
-def extract_resource_filename(url):
-    """从URL中提取服务器文件名"""
-    if '?' in url:
-        url = url.split('?')[0]
-    parsed_url = urlparse(url)
-    path = parsed_url.path
-    filename = os.path.basename(path)
-    return filename.split('.')[0]
-
 def del_special_char(string):
     string = re.sub(r'[^\u4e00-\u9fa5\u0030-\u0039\u0041-\u005a\u0061-\u007a\u3040-\u31FF\.]', '', string)
     return string

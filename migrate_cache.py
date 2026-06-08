@@ -12,6 +12,7 @@ import os
 import sys
 import sqlite3
 import pickle
+from urllib.parse import urlparse
 
 
 def init_db(db_path):
@@ -39,7 +40,10 @@ def init_db(db_path):
 def extract_file_hash(url):
     if '?' in url:
         url = url.split('?')[0]
-    return url.split('/')[-1].split('.')[0]
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    filename = os.path.basename(path)
+    return filename.split('.')[0]
 
 
 def migrate(log_path):

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import datetime
 
 
 class cache_gen():
@@ -25,7 +26,7 @@ class cache_gen():
                 tweet_url TEXT,
                 media_type TEXT,
                 tweet_text TEXT,
-                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                downloaded_at TIMESTAMP
             )
         ''')
         cursor.execute('''
@@ -51,8 +52,8 @@ class cache_gen():
         cursor = self.conn.cursor()
         cursor.execute('''
             INSERT OR IGNORE INTO downloaded
-            (file_hash, url, tweet_time, author_screen_name, author_name, tweet_url, media_type, tweet_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (file_hash, url, tweet_time, author_screen_name, author_name, tweet_url, media_type, tweet_text, downloaded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             file_hash,
             metadata.get('url'),
@@ -61,7 +62,8 @@ class cache_gen():
             metadata.get('author_name'),
             metadata.get('tweet_url'),
             metadata.get('media_type'),
-            metadata.get('tweet_text')
+            metadata.get('tweet_text'),
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ))
         self.conn.commit()
 
