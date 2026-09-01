@@ -1,18 +1,17 @@
-import httpx
-
 import asyncio
-import re
-import os
 import csv
-import time
-import json
 import hashlib
+import json
+import os
+import re
+import time
 from datetime import datetime
 from urllib.parse import quote
-from url_utils import quote_url
-from transaction_generate import get_url_path
-from transaction_generate import get_transaction_id
 
+import httpx
+
+from transaction_generate import get_transaction_id, get_url_path
+from url_utils import quote_url
 
 ##########配置区域##########
 
@@ -72,7 +71,7 @@ def stamp2time(msecs_stamp:int) -> str:
 
 def hash_save_token(media_url):
     m = hashlib.md5()
-    m.update(f'{media_url}'.encode('utf-8'))
+    m.update(f'{media_url}'.encode())
     return m.hexdigest()[:4]
 
 
@@ -84,10 +83,9 @@ def get_heighest_video_quality(variants) -> str:   #找到最高质量的视频�
         max_bitrate = 0
         heighest_url = None
         for i in variants:
-            if 'bitrate' in i:
-                if int(i['bitrate']) > max_bitrate:
-                    max_bitrate = int(i['bitrate'])
-                    heighest_url = i['url']
+            if 'bitrate' in i and int(i['bitrate']) > max_bitrate:
+                max_bitrate = int(i['bitrate'])
+                heighest_url = i['url']
         return heighest_url
 
 def download_control(media_lst, _csv):
@@ -99,9 +97,8 @@ def download_control(media_lst, _csv):
             count = 0
             while True:
                 try:
-                    async with semaphore:
-                        async with httpx.AsyncClient() as client:
-                            response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
+                    async with semaphore, httpx.AsyncClient() as client:
+                        response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
                     with open(_csv_info[6],'wb') as f:  #_csv_info[6] : Saved Path
                         f.write(response.content)
                     break
@@ -116,7 +113,7 @@ def download_control(media_lst, _csv):
 
     asyncio.run(_main())
 
-class csv_gen():
+class csv_gen:
     def __init__(self, save_path:str) -> None:
         self.f = open(f'{save_path}/{datetime.now().strftime("%Y-%m-%d %H-%M-%S")}-{mode}.csv', 'w', encoding='utf-8-sig', newline='')
         self.writer = csv.writer(self.f)
@@ -143,7 +140,7 @@ class csv_gen():
         main_par_info[0] = self.stamp2time(main_par_info[0])    #传进来的是 int 时间戳, 故转换一下
         self.writer.writerow(main_par_info)
 
-class tag_down():
+class tag_down:
     def __init__(self):
         if tag:
             self.folder_path = os.getcwd() + os.sep + del_special_char(tag) + os.sep
@@ -168,7 +165,7 @@ class tag_down():
 
         self.ct = get_transaction_id()
 
-        for i in range(down_count//entries_count):
+        for _ in range(down_count//entries_count):
             url = 'https://x.com/i/api/graphql/AIdc203rPpK_k_2KWSdm7g/SearchTimeline?variables={"rawQuery":"' + quote(tag + _filter) + '","count":' + str(entries_count) + ',"cursor":"' + self.cursor + '","querySource":"typed_query","product":"' + product + '"}&features={"rweb_video_screen_enabled":false,"profile_label_improvements_pcf_label_in_post_enabled":true,"rweb_tipjar_consumption_enabled":true,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"premium_content_api_read_enabled":false,"communities_web_enable_tweet_community_results_fetch":true,"c9s_tweet_anatomy_moderator_badge_enabled":true,"responsive_web_grok_analyze_button_fetch_trends_enabled":false,"responsive_web_grok_analyze_post_followups_enabled":true,"responsive_web_jetfuel_frame":false,"responsive_web_grok_share_attachment_enabled":true,"articles_preview_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":true,"tweet_awards_web_tipping_enabled":false,"responsive_web_grok_show_grok_translated_post":false,"responsive_web_grok_analysis_button_from_backend":false,"creator_subscriptions_quote_tweet_preview_enabled":false,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_grok_image_annotation_enabled":true,"responsive_web_enhance_cards_enabled":false}'
             _path = get_url_path(url)
             url = quote_url(url)
@@ -177,10 +174,7 @@ class tag_down():
                 if not self.search_save_text(url):
                     break
             else:
-                if media_latest:
-                    media_lst = self.search_media_latest(url)
-                else:
-                    media_lst = self.search_media(url)
+                media_lst = self.search_media_latest(url) if media_latest else self.search_media(url)
                 if not media_lst:
                     return
                 download_control(media_lst, self.csv)
@@ -224,7 +218,7 @@ class tag_down():
                 continue
             try:
                 time_stamp = int(tweet['edit_control']['editable_until_msecs']) - 3600000
-            except Exception as e:
+            except Exception:
                 if 'edit_control_initial' in tweet['edit_control']:
                     time_stamp = int(tweet['edit_control']['edit_control_initial']['editable_until_msecs']) - 3600000
                 else:
@@ -291,7 +285,7 @@ class tag_down():
                 continue
             try:
                 time_stamp = int(tweet['edit_control']['editable_until_msecs']) - 3600000
-            except Exception as e:
+            except Exception:
                 if 'edit_control_initial' in tweet['edit_control']:
                     time_stamp = int(tweet['edit_control']['edit_control_initial']['editable_until_msecs']) - 3600000
                 else:

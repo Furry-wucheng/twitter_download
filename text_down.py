@@ -1,16 +1,14 @@
-import httpx
-
+import csv
+import json
 import os
 import re
-import json
-import csv
 import time
 from datetime import datetime
 
-from user_info import User_info
+import httpx
+
 from url_utils import quote_url
-
-
+from user_info import User_info
 
 ##########配置区域##########
 cookie = 'auth_token=xxxxxxxxxxx; ct0=xxxxxxxxxxx;'
@@ -37,7 +35,7 @@ def time2stamp(timestr:str) -> int:
 start_time,end_time = time_range.split(':')
 start_time_stamp,end_time_stamp = time2stamp(start_time),time2stamp(end_time)
 
-class csv_gen():
+class csv_gen:
     def __init__(self, save_path:str, user_name, screen_name, tweet_range) -> None:
         self.f = open(f'{save_path}/{screen_name}-{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}-text.csv', 'w', encoding='utf-8-sig', newline='')
         self.writer = csv.writer(self.f)
@@ -107,7 +105,7 @@ def print_info(_user_info):
 
 
 
-class text_down():
+class text_down:
     def __init__(self, screen_name):
         self._user_info = User_info(screen_name)
 

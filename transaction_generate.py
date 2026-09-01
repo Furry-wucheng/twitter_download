@@ -1,9 +1,10 @@
-import requests
-from urllib.parse import urlparse
-from x_client_transaction.utils import handle_x_migration, get_ondemand_file_url, generate_headers
-from x_client_transaction import ClientTransaction
-import bs4
 import re
+
+import bs4
+import requests
+from x_client_transaction import ClientTransaction
+from x_client_transaction.utils import generate_headers, get_ondemand_file_url, handle_x_migration
+
 
 def get_url_path(url):
     path = re.findall(r'https?://x\.com(.*?)\?', url)[0]

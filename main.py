@@ -1,23 +1,38 @@
+import argparse
+import asyncio
+import json
+import os
 import re
+import sys
 import time
 from datetime import datetime
-from urllib.parse import urlparse
-import httpx
-import asyncio
-import os
-import json
-import sys
+from pathlib import Path
+from urllib.parse import urlsplit
 
-sys.path.append('.')
-from user_info import User_info
+import httpx
+
+from cache_gen import cache_gen
+from config_manager import ProfileError, discover_profiles, load_profile
 from csv_gen import csv_gen
 from md_gen import md_gen
-from cache_gen import cache_gen
+from timeline_utils import evaluate_time_window
 from url_utils import quote_url
+from user_info import User_info
 
-def select_settings_file():
+
+class MediaNotFoundError(Exception):
+    """Raised when an original media variant is unavailable."""
+
+
+def select_settings_file(requested_file=None):
     """选择要使用的 settings 文件"""
-    settings_files = [f for f in os.listdir('.') if f.startswith('settings') and f.endswith('.json')]
+    if requested_file:
+        requested_name = Path(requested_file).name
+        print(f"使用配置文件: {requested_name}\n")
+        return requested_name
+
+    profiles = discover_profiles()
+    settings_files = [profile["filename"] for profile in profiles]
     if not settings_files:
         print("错误: 未找到任何 settings 文件")
         sys.exit(1)
@@ -28,14 +43,12 @@ def select_settings_file():
     print("发现多个配置文件，请选择要使用的配置：")
     print("=" * 60)
     settings_files.sort()
+    profile_lookup = {profile["filename"]: profile for profile in profiles}
     for idx, filename in enumerate(settings_files, 1):
-        try:
-            with open(filename, 'r', encoding='utf8') as f:
-                temp_settings = json.load(f)
-                user_info = temp_settings.get('user_lst', '未设置')
-                print(f"{idx}. {filename:<30} (用户: {user_info})")
-        except:
-            print(f"{idx}. {filename}")
+        profile = profile_lookup[filename]
+        users = ", ".join(profile["users"]) or "未设置"
+        suffix = f"用户: {users}" if profile["valid"] else f"配置错误: {profile['error']}"
+        print(f"{idx}. {filename:<30} ({suffix})")
     print("=" * 60)
     while True:
         try:
@@ -55,12 +68,7 @@ def select_settings_file():
 
 def extract_resource_filename(url):
     """从URL中提取服务器文件名（不含扩展名和参数）"""
-    if '?' in url:
-        url = url.split('?')[0]
-    parsed_url = urlparse(url)
-    path = parsed_url.path
-    filename = os.path.basename(path)
-    return filename.split('.')[0]
+    return Path(urlsplit(url).path).stem
 
 def del_special_char(string):
     string = re.sub(r'[^\u4e00-\u9fa5\u0030-\u0039\u0041-\u005a\u0061-\u007a\u3040-\u31FF\.]', '', string)
@@ -72,19 +80,17 @@ def stamp2time(msecs_stamp:int) -> str:
     return otherStyleTime
 
 def time2stamp(timestr:str) -> int:
-    datetime_obj = datetime.strptime(timestr, "%Y-%m-%d")
-    msecs_stamp = int(time.mktime(datetime_obj.timetuple()) * 1000.0 + datetime_obj.microsecond / 1000.0)
+    datetime_obj = datetime.strptime(timestr, "%Y-%m-%d").astimezone()
+    msecs_stamp = int(datetime_obj.timestamp() * 1000)
     return msecs_stamp
 
 def time_comparison(now, start, end):
-    start_label = True
-    start_down  = False
-    #twitter : latest -> old
-    if now >= start and now <= end:     #符合时间条件，下载
-        start_down = True
-    elif now < start:     #超出时间范围，结束
-        start_label = False
-    return [start_down, start_label]
+    return evaluate_time_window(
+        now,
+        start,
+        end,
+        ordered_by_tweet_time=not has_likes,
+    )
     
 
 #读取配置
@@ -107,14 +113,20 @@ end_time_stamp = 2548484357000    #2050-10-04
 start_label = True
 First_Page = True       #首页提取内容时特殊处理
 
-# 选择配置文件
-settings_file = select_settings_file()
+# 选择并校验配置文件
+argument_parser = argparse.ArgumentParser(description="下载 X/Twitter 用户媒体")
+argument_parser.add_argument("-c", "--config", help="要使用的 settings*.json 配置文件")
+arguments = argument_parser.parse_args()
+settings_file = select_settings_file(arguments.config)
 
-with open(settings_file, 'r', encoding='utf8') as f:
-    settings = json.load(f)
-    if not settings['save_path']:
-        settings['save_path'] = os.getcwd()
-    settings['save_path'] += os.sep
+try:
+    settings = load_profile(settings_file, require_runtime=True)
+except ProfileError as exc:
+    print(f"配置错误: {exc}")
+    raise SystemExit(2) from exc
+
+settings['save_path'] = str(Path(settings['save_path']).expanduser().resolve()) if settings['save_path'] else os.getcwd()
+if settings:
     if settings['has_retweet']:
         has_retweet = True
     if settings['high_lights']:
@@ -133,21 +145,13 @@ with open(settings_file, 'r', encoding='utf8') as f:
         has_retweet = True
         has_likes = True
         has_highlights = False
-        start_time_stamp = 655028357000   #1990-10-04
-        end_time_stamp = 2548484357000    #2050-10-04
     if settings['has_video']:
         has_video = True
     if settings['log_output']:
         log_output = True
-    if settings['max_concurrent_requests']:
-        max_concurrent_requests = settings['max_concurrent_requests']
-    else:
-        max_concurrent_requests = 8
-###### proxy ######
-    if settings['proxy']:
-        proxies = settings['proxy']
-    else:
-        proxies = None
+    max_concurrent_requests = settings['max_concurrent_requests']
+    ###### proxy ######
+    proxies = settings['proxy'] or None
 
 ############
     if settings['image_format'] == 'orig':
@@ -163,8 +167,6 @@ with open(settings_file, 'r', encoding='utf8') as f:
     if settings['media_count_limit']:
         media_count_limit = settings['media_count_limit']
 
-    f.close()
-
 backup_stamp = start_time_stamp
 
 _headers = {
@@ -178,16 +180,19 @@ down_count = 0      #下载图片数计数
 
 def get_other_info(_user_info):
     url = 'https://twitter.com/i/api/graphql/xc8f1g7BYqr6VTzTbvNlGw/UserByScreenName?variables={"screen_name":"' + _user_info.screen_name + '","withSafetyModeUserFields":false}&features={"hidden_profile_likes_enabled":false,"hidden_profile_subscriptions_enabled":false,"responsive_web_graphql_exclude_directive_enabled":true,"verified_phone_label_enabled":false,"subscriptions_verification_info_verified_since_enabled":true,"highlights_tweets_tab_ui_enabled":true,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"responsive_web_graphql_timeline_navigation_enabled":true}&fieldToggles={"withAuxiliaryUserLabels":false}'
+    response = ""
     try:
         global request_count
-        response = httpx.get(quote_url(url), headers=_headers, proxy=proxies).text
+        http_response = httpx.get(quote_url(url), headers=_headers, proxy=proxies)
+        http_response.raise_for_status()
+        response = http_response.text
         request_count += 1
         raw_data = json.loads(response)
         _user_info.rest_id = raw_data['data']['user']['result']['rest_id']
         _user_info.name = raw_data['data']['user']['result']['legacy']['name']
         _user_info.statuses_count = raw_data['data']['user']['result']['legacy']['statuses_count']
         _user_info.media_count = raw_data['data']['user']['result']['legacy']['media_count']
-    except Exception as e:
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError) as e:
         print('获取信息失败')
         print(e)
         print(response)
@@ -218,20 +223,16 @@ def get_download_url(_user_info):
         max_bitrate = 0
         heighest_url = None
         for i in variants:
-            if 'bitrate' in i:
-                if int(i['bitrate']) > max_bitrate:
-                    max_bitrate = int(i['bitrate'])
-                    heighest_url = i['url']
+            if 'bitrate' in i and int(i['bitrate']) > max_bitrate:
+                max_bitrate = int(i['bitrate'])
+                heighest_url = i['url']
         return heighest_url
 
 
     def get_url_from_content(content):
         global start_label
         _photo_lst = []
-        if has_retweet or has_highlights:
-            x_label = 'content'
-        else:
-            x_label = 'item'
+        x_label = 'content' if has_retweet or has_highlights else 'item'
         for i in content:
             try:
                 if 'promoted-tweet' in i['entryId']:        #排除广告
@@ -268,8 +269,6 @@ def get_download_url(_user_info):
                             name = a['retweeted_status_result']['result']['core']['user_results']['result']['legacy']['name']
                             screen_name = a['retweeted_status_result']['result']['core']['user_results']['result']['legacy']['screen_name']
                             full_text = a['retweeted_status_result']['result']['legacy']['full_text']
-                            id_str = a['retweeted_status_result']['result']['legacy']['id_str']
-                            
                             if 'extended_entities' in a['retweeted_status_result']['result']['legacy'] and screen_name != _user_info.screen_name:
                                 _photo_lst += [(get_heighest_video_quality(_media['video_info']['variants']), f'{timestr}_@{screen_name}-vid-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Video', get_heighest_video_quality(_media['video_info']['variants']), '', full_text] + frr) if 'video_info' in _media and has_video else (_media['media_url_https'], f'{timestr}_@{screen_name}-img-retweet', [tweet_msecs, name, f"@{screen_name}", _media['expanded_url'], 'Image', _media['media_url_https'], '', full_text] + frr) for _media in a['retweeted_status_result']['result']['legacy']['extended_entities']['media']]
 
@@ -298,7 +297,9 @@ def get_download_url(_user_info):
                         start_label = False
                         break
 
-            except Exception as e:
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                if log_output:
+                    print(f"跳过无法解析的时间线条目: {exc}")
                 continue
             if 'cursor-bottom' in i['entryId']:     #更新下一页的请求编号(含转推模式&亮点模式)
                 _user_info.cursor = i['content']['value']
@@ -319,17 +320,17 @@ def get_download_url(_user_info):
         url_top = 'https://twitter.com/i/api/graphql/Le6KlbilFmSu-5VltFND-Q/UserMedia?variables={"userId":"' + _user_info.rest_id + '","count":500,'
         url_bottom = '"includePromotedContent":false,"withClientEventToken":false,"withBirdwatchNotes":false,"withVoice":true,"withV2Timeline":true}&features={"responsive_web_graphql_exclude_directive_enabled":true,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"tweetypie_unmention_optimization_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":false,"tweet_awards_web_tipping_enabled":false,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_media_download_video_enabled":false,"responsive_web_enhance_cards_enabled":false}'
 
-    if _user_info.cursor:
-        url = url_top + '"cursor":"' + _user_info.cursor + '",' + url_bottom
-    else:
-        url = url_top + url_bottom      #第一页,无cursor
+    url = url_top + '"cursor":"' + _user_info.cursor + '",' + url_bottom if _user_info.cursor else url_top + url_bottom
+    response = ""
     try:
         global request_count
-        response = httpx.get(quote_url(url), headers=_headers, proxy=proxies).text
+        http_response = httpx.get(quote_url(url), headers=_headers, proxy=proxies)
+        http_response.raise_for_status()
+        response = http_response.text
         request_count += 1
         try:
             raw_data = json.loads(response)
-        except Exception:
+        except json.JSONDecodeError:
             if 'Rate limit exceeded' in response:
                 print('API次数已超限')
             else:
@@ -368,7 +369,7 @@ def get_download_url(_user_info):
         
         if not photo_lst:
             photo_lst.append(True)
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as e:
         print('获取推文信息错误')
         print(e)
         print(response)
@@ -379,10 +380,7 @@ def download_control(_user_info):
     async def _main():
         async def down_save(url, prefix, csv_info, order: int):
             # 保存原始URL用于缓存（去除参数）
-            if '?' in url:
-                original_url = url.split('?')[0]
-            else:
-                original_url = url
+            original_url = url.split('?', 1)[0] if '?' in url else url
 
             # 使用服务器文件名
             filename = extract_resource_filename(url)
@@ -398,21 +396,21 @@ def download_control(_user_info):
             else:
                 try:
                     if orig_format:
-                        url += f'?name=orig'
+                        url += '?name=orig'
                         _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.{csv_info[5][-3:]}' # 根据图片 url 获取原始格式
                     else: # 指定格式时，先使用 name=orig，404 则切回 name=4096x4096，以保证最大尺寸
                         _file_name = f'{_user_info.save_path + os.sep}{prefix}_{filename}.{img_format}'
                         if img_format != 'png':
-                            url += f'?format=jpg&name=4096x4096'
+                            url += '?format=jpg&name=4096x4096'
                         else:
-                            url += f'?format=png&name=4096x4096'
+                            url += '?format=png&name=4096x4096'
                     # if os.path.exists(_file_name):
                     #     if log_output:
                     #         print(f'{_file_name} 已存在，跳过')
                     #     if down_log:
                     #         cache_data.add(original_url)
                     #     return False
-                except Exception as e:
+                except (KeyError, IndexError, TypeError):
                     print(url)
                     return False
 
@@ -423,14 +421,13 @@ def download_control(_user_info):
             while True:
                 try:
                     async with semaphore:
-                        async with httpx.AsyncClient(proxy=proxies) as client:
-                            global down_count
-                            response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
-                            if response.status_code == 404:
-                                raise Exception('404')
-                            down_count += 1
-                    with open(_file_name,'wb') as f:
-                        f.write(response.content)
+                        global down_count
+                        response = await client.get(quote_url(url))
+                        if response.status_code == 404:
+                            raise MediaNotFoundError
+                        response.raise_for_status()
+                        down_count += 1
+                    await asyncio.to_thread(Path(_file_name).write_bytes, response.content)
 
                     csv_file.data_input(csv_info)
 
@@ -451,8 +448,8 @@ def download_control(_user_info):
                         cache_data.add(filename, metadata)
 
                     break
-                except Exception as e:
-                    if '.mp4' in url or orig_format or str(e) != "404":
+                except (httpx.HTTPError, OSError, MediaNotFoundError) as exc:
+                    if '.mp4' in url or orig_format or not isinstance(exc, MediaNotFoundError):
                         count += 1
                         if count >= 50:
                             print(f'{_file_name}=====>第{count}次下载失败，已跳过该文件。')
@@ -460,22 +457,25 @@ def download_control(_user_info):
                             break
                         print(f'{_file_name}=====>第{count}次下载失败,正在重试')
                         print(url)
+                        await asyncio.sleep(min(0.25 * (2 ** min(count, 5)), 5))
                     else:
                         url = url.replace('name=orig', 'name=4096x4096')
 
-        while True:
-            photo_lst = get_download_url(_user_info)
-            if not photo_lst:
-                break
-            elif photo_lst[0] == True:
-                continue
-            semaphore = asyncio.Semaphore(max_concurrent_requests)    #最大并发数量，默认为8，对自己网络有自信的可以调高
-            if down_log:
-                # 检查缓存时使用 file_hash
-                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.is_present(extract_resource_filename(url[0]))])
-            else:
-                await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst)])
-            _user_info.count += len(photo_lst)      #更新计数
+        timeout = httpx.Timeout(16, connect=3.05)
+        async with httpx.AsyncClient(proxy=proxies, timeout=timeout, follow_redirects=True) as client:
+            while True:
+                photo_lst = get_download_url(_user_info)
+                if not photo_lst:
+                    break
+                elif photo_lst[0] is True:
+                    continue
+                semaphore = asyncio.Semaphore(max_concurrent_requests)    #最大并发数量，默认为8，对自己网络有自信的可以调高
+                if down_log:
+                    # 检查缓存时使用 file_hash
+                    await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst) if cache_data.should_download(extract_resource_filename(url[0]))])
+                else:
+                    await asyncio.gather(*[asyncio.create_task(down_save(url[0], url[1], url[2], order)) for order,url in enumerate(photo_lst)])
+                _user_info.count += len(photo_lst)      #更新计数
 
     asyncio.run(_main())
 
@@ -486,12 +486,9 @@ def main(_user_info: object):
     if not get_other_info(_user_info):
         return False
     print_info(_user_info)
-    _path = settings['save_path'] + _user_info.screen_name
-    if not os.path.exists(_path):   #创建文件夹
-        os.makedirs(settings['save_path']+_user_info.screen_name)       #用户名建文件夹
-        _user_info.save_path = settings['save_path']+_user_info.screen_name
-    else:
-        _user_info.save_path = _path
+    output_path = Path(settings['save_path']) / _user_info.screen_name
+    output_path.mkdir(parents=True, exist_ok=True)
+    _user_info.save_path = str(output_path)
 
     global csv_file
     csv_file = csv_gen(_user_info.save_path, _user_info.name, _user_info.screen_name, settings['time_range'])
@@ -510,10 +507,7 @@ def main(_user_info: object):
             global start_time_stamp
             re_rule = r'\d{4}-\d{2}-\d{2}'
             for i in files[::-1]:
-                if "-img_" in i:
-                    start_time_stamp = time2stamp(re.findall(re_rule, i)[0])
-                    break
-                elif "-vid_" in i:
+                if "-img_" in i or "-vid_" in i:
                     start_time_stamp = time2stamp(re.findall(re_rule, i)[0])
                     break
                 else:
@@ -521,21 +515,20 @@ def main(_user_info: object):
         else:
             start_time_stamp = backup_stamp
 
-    download_control(_user_info)
-
-    csv_file.csv_close()
-    
-    if md_output:
-        md_file.md_close()
-
-    if down_log:
-        cache_data.close()
+    try:
+        download_control(_user_info)
+    finally:
+        csv_file.csv_close()
+        if md_output:
+            md_file.md_close()
+        if down_log:
+            cache_data.close()
     print(f'{_user_info.name}下载完成\n\n')
 
-if __name__=='__main__':
+if __name__ == '__main__':
     _start = time.time()
-    for i in settings['user_lst'].split(','):
-        main(User_info(i))
+    for screen_name in settings['user_lst'].split(','):
+        main(User_info(screen_name))
         start_label = True
         First_Page = True
     print(f'共耗时:{time.time()-_start}秒\n共调用{request_count}次API\n共下载{down_count}份图片/视频')

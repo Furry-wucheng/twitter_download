@@ -43,7 +43,77 @@ elif 不包含:
 下载不计入次数 
 ```
 
+## 使用 uv 启动
+
+项目使用 [uv](https://docs.astral.sh/uv/) 管理 Python 3.13 环境和依赖：
+
+```powershell
+uv sync
+```
+
+### 原生桌面 GUI（推荐）
+
+```powershell
+uv run python gui.py
+```
+
+也可以使用一键启动脚本。脚本会优先检测 `uv`，没有 uv 时再使用系统 Python，
+并在缺少依赖时自动安装 `requirements.txt`：
+
+```powershell
+start.bat
+```
+
+```shell
+sh start.sh
+```
+
+只想检查运行环境而不打开窗口时，可以运行 `start.bat --check` 或
+`sh start.sh --check`。
+
+GUI 基于 PySide6，提供：
+
+- 扫描和切换项目目录下的 `settings*.json` 配置档案
+- 新建、复制、编辑和删除非默认配置
+- 对用户名、Cookie、时间范围、模式和并发数量进行保存前校验
+- 为不同配置启动相互独立的下载进程，可同时运行多个任务
+- 实时显示任务状态和下载日志，并支持安全停止任务
+- 保留原有 CLI、SQLite 缓存、Markdown 和 CSV 输出能力
+
+Likes 模式的时间范围按原推文的发布日期筛选，不代表点赞日期。由于 Likes
+时间线并不按推文发布日期排序，程序会继续检查后续页面，不会在遇到一条较早推文时提前结束。
+
+GUI 只读取本机配置，不会将 Cookie 发送给额外服务。`settings_*.json` 和
+`settings-*.json` 默认被 Git 忽略；请勿把包含 Cookie 的个人配置提交到仓库。
+
+### CLI
+
+没有指定配置时，CLI 会列出所有配置供选择：
+
+```powershell
+uv run python main.py
+```
+
+也可以直接指定一份配置，适合脚本或定时任务：
+
+```powershell
+uv run python main.py --config settings.json
+uv run python main.py --config settings-personal.json
+```
+
+旧版 `cache_data.log` 只应来自你信任的本项目历史版本，可这样迁移：
+
+```powershell
+uv run python migrate_cache.py path/to/cache_data.log
+```
+
 # Change Log
+
+* **2026-09-02**
+  * 新增 PySide6 原生桌面 GUI，支持多配置管理、并行任务、实时日志和任务停止
+  * 新增配置文件校验和安全路径处理，CLI 支持 `--config`
+  * 改进 SQLite 缓存接口、下载进程资源释放、HTTP 重试和错误提示
+  * 项目依赖改由 uv 锁定，并增加 Ruff 与 pytest 质量检查
 
 * **2026-06-08**
   * 缓存系统重构：从 pickle 迁移到 SQLite，即时持久化，无需定时保存
@@ -113,22 +183,22 @@ elif 不包含:
 </div>
 
 部署
---- 
+---
 
-**Linux** : 
-``` 
-git clone https://github.com/caolvchong-top/twitter_download.git 
-cd twitter_download 
-pip3 install -r requirements.txt
+```shell
+git clone https://github.com/caolvchong-top/twitter_download.git
+cd twitter_download
+uv sync
+```
 
-#Python版本须>=3.8  httpx==0.28.1
-``` 
-**运行** : 
-``` 
-配置settings.json文件
-python3 main.py 
-``` 
-**Windows** 和上面的一样，配置完setting.json后运行main.py即可 
+当前 uv 环境要求 Python 3.13。Windows 推荐运行 `uv run python gui.py`；Linux
+需要提供可用的 Qt 图形桌面环境。服务器或无桌面环境请使用 CLI：
+
+```shell
+uv run python main.py --config settings.json
+```
+
+仍需使用 pip 时，可以运行 `python -m pip install -r requirements.txt`，但 uv 是本分支的主要支持方式。
 
 
 注意事项

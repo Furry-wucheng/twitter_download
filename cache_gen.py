@@ -1,20 +1,22 @@
-import os
 import sqlite3
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Self
 
 
-class cache_gen():
+class CacheStore:
+    """SQLite-backed record of media that was downloaded successfully."""
 
-    def __init__(self, save_path, is_share=False) -> None:
-        if is_share:
-            self.db_path = os.path.dirname(save_path) + os.sep + "cache_data.db"
-        else:
-            self.db_path = save_path + os.sep + "cache_data.db"
+    def __init__(self, save_path: str | Path, is_share: bool = False) -> None:
+        save_directory = Path(save_path).resolve()
+        cache_directory = save_directory.parent if is_share else save_directory
+        cache_directory.mkdir(parents=True, exist_ok=True)
+        self.db_path = cache_directory / "cache_data.db"
 
         self.conn = sqlite3.connect(self.db_path)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         cursor = self.conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS downloaded (
@@ -37,15 +39,22 @@ class cache_gen():
         ''')
         self.conn.commit()
 
-    def __del__(self):
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
         self.close()
 
-    def close(self):
-        if hasattr(self, 'conn') and self.conn:
-            self.conn.close()
+    def close(self) -> None:
+        connection = getattr(self, "conn", None)
+        if connection is not None:
+            connection.close()
             self.conn = None
 
-    def add(self, file_hash, metadata=None):
+    def add(self, file_hash: str, metadata: dict[str, Any] | None = None) -> bool:
+        """Record a successful download and report whether a row was inserted."""
+        if not file_hash:
+            raise ValueError("file_hash cannot be empty")
         if metadata is None:
             metadata = {}
 
@@ -63,12 +72,22 @@ class cache_gen():
             metadata.get('tweet_url'),
             metadata.get('media_type'),
             metadata.get('tweet_text'),
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            datetime.now().astimezone().isoformat(timespec="seconds"),
         ))
         self.conn.commit()
+        return cursor.rowcount > 0
 
-    def is_present(self, file_hash):
+    def contains(self, file_hash: str) -> bool:
+        if not file_hash:
+            return False
         cursor = self.conn.cursor()
         cursor.execute('SELECT 1 FROM downloaded WHERE file_hash = ?', (file_hash,))
-        result = cursor.fetchone()
-        return result is None
+        return cursor.fetchone() is not None
+
+    def should_download(self, file_hash: str) -> bool:
+        """Return true when a media resource is not present in the cache."""
+        return not self.contains(file_hash)
+
+
+# Backwards-compatible import used by the original downloader.
+cache_gen = CacheStore

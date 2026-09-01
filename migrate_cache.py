@@ -8,14 +8,15 @@
     python migrate_cache.py ./output/username/cache_data.log
 """
 
-import os
-import sys
-import sqlite3
+import argparse
 import pickle
-from urllib.parse import urlparse
+import sqlite3
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 
-def init_db(db_path):
+def init_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -37,34 +38,31 @@ def init_db(db_path):
     return conn
 
 
-def extract_file_hash(url):
-    if '?' in url:
-        url = url.split('?')[0]
-    parsed_url = urlparse(url)
-    path = parsed_url.path
-    filename = os.path.basename(path)
-    return filename.split('.')[0]
+def extract_file_hash(url: str) -> str:
+    return Path(urlsplit(url).path).stem
 
 
-def migrate(log_path):
-    if not os.path.exists(log_path):
+def migrate(log_path: str | Path) -> bool:
+    source = Path(log_path).expanduser().resolve()
+    if not source.exists():
         print(f"错误: 找不到 {log_path}")
         return False
 
-    db_path = os.path.splitext(log_path)[0] + '.db'
-    if os.path.exists(db_path):
+    db_path = source.with_suffix('.db')
+    if db_path.exists():
         print(f"错误: 目标数据库已存在 {db_path}")
         print("如需重新迁移，请先删除该文件")
         return False
 
     try:
-        with open(log_path, 'rb') as f:
-            old_data = pickle.load(f)
-    except Exception as e:
-        print(f"错误: 读取失败 - {e}")
+        # Pickle is only safe for a cache file created by this application.
+        with source.open('rb') as file:
+            old_data: Any = pickle.load(file)
+    except (OSError, pickle.PickleError, EOFError) as exc:
+        print(f"错误: 读取失败 - {exc}")
         return False
 
-    if not old_data:
+    if not isinstance(old_data, (set, list, tuple)) or not old_data:
         print("旧缓存为空，无需迁移")
         return False
 
@@ -72,17 +70,24 @@ def migrate(log_path):
     cursor = conn.cursor()
 
     migrated = 0
-    for url in old_data:
+    for value in old_data:
+        if not isinstance(value, str):
+            print(f"警告: 跳过非 URL 缓存项 [{value!r}]")
+            continue
+        url = value
         file_hash = extract_file_hash(url)
-        url_clean = url.split('?')[0] if '?' in url else url
+        if not file_hash:
+            print(f"警告: 无法识别资源文件名 [{url}]")
+            continue
+        url_clean = url.split('?', 1)[0]
         try:
             cursor.execute(
                 'INSERT OR IGNORE INTO downloaded (file_hash, url) VALUES (?, ?)',
                 (file_hash, url_clean)
             )
             migrated += cursor.rowcount
-        except Exception as e:
-            print(f"警告: 迁移失败 [{url}] - {e}")
+        except sqlite3.Error as exc:
+            print(f"警告: 迁移失败 [{url}] - {exc}")
 
     conn.commit()
     conn.close()
@@ -91,13 +96,12 @@ def migrate(log_path):
     return True
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-
-    migrate(sys.argv[1])
+def main() -> int:
+    parser = argparse.ArgumentParser(description="将旧的 pickle 缓存迁移到 SQLite")
+    parser.add_argument("cache_file", type=Path, help="cache_data.log 的路径")
+    args = parser.parse_args()
+    return 0 if migrate(args.cache_file) else 1
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

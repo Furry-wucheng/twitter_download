@@ -1,5 +1,5 @@
 
-class User_info():
+class User_info:
     def __init__(self, screen_name:str):
         self.screen_name = screen_name      #用户id( @后面的 )
         self.rest_id = None      #用户数字ID

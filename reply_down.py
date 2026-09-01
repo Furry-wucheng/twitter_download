@@ -1,19 +1,17 @@
-import httpx
-
 import asyncio
-import re
-import os
 import csv
-import time
 import json
+import os
+import re
+import time
 from datetime import datetime
 from urllib.parse import quote
+
+import httpx
+
+from tag_down import get_heighest_video_quality, hash_save_token, stamp2time
+from transaction_generate import get_transaction_id, get_url_path
 from url_utils import quote_url
-from tag_down import get_heighest_video_quality
-from tag_down import hash_save_token
-from tag_down import stamp2time
-from transaction_generate import get_transaction_id
-from transaction_generate import get_url_path
 
 ##########配置区域##########
 
@@ -45,7 +43,7 @@ def del_special_char(string):
     string = re.sub(r'[^#\u4e00-\u9fa5\u0030-\u0039\u0041-\u005a\u0061-\u007a\u3040-\u31FF\.]', '', string)
     return string
 
-class csv_gen():
+class csv_gen:
     def __init__(self, save_path:str) -> None:
         self.f = open(f'{save_path}{datetime.now().strftime("%Y-%m-%d %H-%M-%S")}-Reply.csv', 'w', encoding='utf-8-sig', newline='')
         self.writer = csv.writer(self.f)
@@ -79,9 +77,8 @@ def download_control(media_lst):
             count = 0
             while True:  #下载失败重试次数
                 try:
-                    async with semaphore:
-                        async with httpx.AsyncClient() as client:
-                            response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
+                    async with semaphore, httpx.AsyncClient() as client:
+                        response = await client.get(quote_url(url), timeout=(3.05, 16))        #如果出现第五次或以上的下载失败,且确认不是网络问题,可以适当降低最大并发数量
                     with open(_file_name,'wb') as f:
                         f.write(response.content)
                     break
@@ -123,7 +120,7 @@ search_advanced = ''
 # ------------------------ #
 
 
-class Reply_down():
+class Reply_down:
     def __init__(self, _target):
         self.target = _target
         self.folder_path = os.getcwd() + os.sep

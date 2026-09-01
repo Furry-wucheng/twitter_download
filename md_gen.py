@@ -1,8 +1,9 @@
-import time
 import re
+import time
 from datetime import datetime
 
-class md_gen():
+
+class md_gen:
     def __init__(self, save_path:str, user_name, screen_name, tweet_range, has_likes, media_count_limit) -> None:
         self.f = open(f'{save_path}/{screen_name}-{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_1.md', 'w', encoding='utf-8-sig', newline='')
         self.f.write(f"{user_name} {screen_name}\n")
@@ -31,7 +32,7 @@ class md_gen():
         
     def media_tweet_input(self, csv_info, prefix) -> None:
         fixed_filename = csv_info[6].replace(' ', '%20')
-        fixed_timestr = csv_info[0] if type(csv_info[0]) == str else self.stamp2time(csv_info[0])
+        fixed_timestr = csv_info[0] if isinstance(csv_info[0], str) else self.stamp2time(csv_info[0])
         currentDate = fixed_timestr[0:7]
         
         tweet_status_id = re.findall(r"status/(\d+)", csv_info[3])[0]

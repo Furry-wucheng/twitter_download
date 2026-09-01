@@ -1,10 +1,10 @@
-import os
-import httpx
-import re
 import json
+import os
+import re
+
+import httpx
+
 from url_utils import quote_url
-
-
 
 ##########配置区域##########
 cookie = 'auth_token=xxxxxxxxxxx; ct0=xxxxxxxxxxx;'

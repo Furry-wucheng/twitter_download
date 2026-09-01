@@ -17,8 +17,6 @@ env/
 
 # UV
 .uv/
-uv.lock
-.python-version
 
 # IDE
 .idea/
